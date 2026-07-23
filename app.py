@@ -100,3 +100,63 @@ ANSWER:"""
     return answer
 
 #ROUTES
+@app.route('/')
+def index():
+    #Give each browser session a Unique ID
+    if 'session_id' not in session:
+        import uuid
+        session['session_id'] = str(uuid.uuid4())
+    return render_template('index.html')
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    if 'pdf' not in request.files:
+        return jsonify({"error": "No PDF file provided"}), 400
+
+    pdf_file = request.files['pdf']
+    if not pdf_file.filename.endswith('.pdf'):
+        return jsonify({"error": "Please upload a PDF file"}), 400
+
+    session_id = session.get('session_id', 'default')
+
+    #save pdf to a temp file so PyPDFLoader can read it
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+        pdf_file.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        pages, chunks = process_pdf(tmp_path, session_id)
+        os.unlink(tmp_path) #delete temp file after processing
+        return jsonify({
+            'message' : f'PDF processed - {pages} pages, {chunks} chunks ready',
+            'pages' : pages,
+            'chunks' : chunks
+        })
+    except Exception as e:
+        os.unlink(tmp_path)
+        return jsonify({'error' : f'Processing failed: {str(e)}'}), 500
+@app.route('/chat', methods=['POST'])
+def chat():
+    data = request.get_json()
+    question = data.get('question', '').strip()
+    session_id = session.get('session_id', 'default')
+
+    if not question:
+        return jsonify({'error': 'No question provided'}), 400
+
+    try:
+        answer = get_answer(question, session_id)
+        return jsonify({'answer': answer})
+    except Exception as e:
+        return jsonify({'error': f'Failed to get answer: {str(e)}'}), 500
+
+@app.route('/clear', methods=['POST'])
+def clear():
+    """Clear the current session's PDF and chat history"""
+    session_id = session.get('session_id', 'default')
+    vector_stores.pop(session_id, None)
+    chat_histories.pop(session_id, None)
+    return jsonify({'message': 'Session cleared'})
+
+if __name__ == '__main__':
+    app.run(debug=True)
